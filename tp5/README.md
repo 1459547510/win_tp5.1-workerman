@@ -1,186 +1,238 @@
-![](https://box.kancloud.cn/5a0aaa69a5ff42657b5c4715f3d49221) 
+## tp5.1（文档php版本使用7.2.9）
+[tp5.1官网](https://www.kancloud.cn/manual/thinkphp5_1/353946)
+[tp5.1 git](https://github.com/top-think/think)
+cmd输入命令安装tp5.1
 
-ThinkPHP 5.1（LTS版本） —— 12载初心，你值得信赖的PHP框架
-===============
+`composer create-project topthink/think=5.1.* tp5`
 
-[![Scrutinizer Code Quality](https://scrutinizer-ci.com/g/top-think/framework/badges/quality-score.png?b=5.1)](https://scrutinizer-ci.com/g/top-think/framework/?branch=5.1)
-[![Build Status](https://travis-ci.org/top-think/framework.svg?branch=master)](https://travis-ci.org/top-think/framework)
-[![Total Downloads](https://poser.pugx.org/topthink/framework/downloads)](https://packagist.org/packages/topthink/framework)
-[![Latest Stable Version](https://poser.pugx.org/topthink/framework/v/stable)](https://packagist.org/packages/topthink/framework)
-[![PHP Version](https://img.shields.io/badge/php-%3E%3D5.6-8892BF.svg)](http://www.php.net/)
-[![License](https://poser.pugx.org/topthink/framework/license)](https://packagist.org/packages/topthink/framework)
+<br/>
 
-ThinkPHP5.1对底层架构做了进一步的改进，减少依赖，其主要特性包括：
+## 安装workerman扩展
 
- + 采用容器统一管理对象
- + 支持Facade
- + 注解路由支持
- + 路由跨域请求支持
- + 配置和路由目录独立
- + 取消系统常量
- + 助手函数增强
- + 类库别名机制
- + 增加条件查询
- + 改进查询机制
- + 配置采用二级
- + 依赖注入完善
- + 支持`PSR-3`日志规范
- + 中间件支持（V5.1.6+）
- + Swoole/Workerman支持（V5.1.18+）
+[workerman官网](https://www.workerman.net/)
+
+tp5根目录下
+
+`composer require topthink/think-worker=2.0.*`
+
+<br/>
+
+## 安装workerman Channel分布式通讯组件
+
+[官方文档](https://www.workerman.net/doc/workerman/components/channel.html)
+
+tp5跟目录下
+
+`composer require workerman/channel:*`
+
+<br/>
+
+## 修改config/worker_server.php
+
+1、增加属性（可选）
+
+单进程添加，并且配置文件中进程数必须设置为1
+
+[官方文档说明](https://www.workerman.net/doc/workerman/faq/send-data-to-client.html)
+
+```php
+'uidConnections' => []
+```
+
+2、设置自定义服务类
+
+这里是在模块 workermanws\controller下,类型为WorkemanDemo
+
+```php
+// 自定义Workerman服务类名 支持数组定义多个服务
+'worker_class'   => 'app\workermanws\controller\WorkermanDemo', 
+```
+
+```php
+<?php
+namespace app\workermanws\controller;
+
+use think\worker\Server;
+use think\Db;
+use \GatewayWorker\Lib\Gateway;
+use Workerman\Worker;
+use Workerman\Connection\TcpConnection;
+use Channel;
+
+class WorkermanDemo extends Server
+{
+	protected $socket = 'websocket://0.0.0.0:2346';
+	protected $port = '2346';
+	protected $protocol = 'websocket';
+	protected $host = '0.0.0.0';
+
+	protected $workerId;
+
+	public function onWorkerStart($worker)
+	{
+		// Channel客户端连接到Channel服务端
+		// 127.0.0.1为本地连接  如果是两台服务器设置为内网ip
+		Channel\Client::connect('127.0.0.1', 5506);
+		// 以自己的进程id为事件名称
+		$event_name = $worker->id;
+		echo 'woker id:' . $event_name . "\n";
+		// 订阅worker->id事件并注册事件处理函数
+		Channel\Client::on($event_name, function($event_data)use($worker){
+			print_r($event_data);
+			echo "\n";
+			$to_connection_id = $event_data['to_connection_id'];
+			$message = $event_data['content'];
+			if(!isset($worker->connections[$to_connection_id]))
+			{
+				echo "connection not exists\n";
+				return;
+			}
+			$to_connection = $worker->connections[$to_connection_id];
+			echo $message . "\n";
+			$to_connection->send($message);
+		});
+	}
 
 
-> ThinkPHP5的运行环境要求PHP5.6以上，兼容PHP8.0。
+	public function onConnect($connection){
+		global $worker;
+		$msg = "workerID:{$connection->worker->id} connectionID:{$connection->id} connected\n";
+		echo $msg;
+		$connection->send($msg);
+	}
 
-## 安装
+	public function onMessage($connection,$data)
+	{
+		global $worker;
 
-使用composer安装
+		// ?to_wid=0&to_cid=2&msg=hello
+		$data = json_decode($data,true);
+		$event_name = $data['to_wid'];
+		$to_connection_id = $data['to_cid'];
+		$content = $data['msg'];
 
-~~~
-composer create-project topthink/think tp
-~~~
+		Channel\Client::publish($event_name, array(
+			'to_connection_id' => $to_connection_id,
+			'content'          => $content
+		 ));
+		$connection->send($content);
+	}
+	protected function FunctionName()
+	{
+		# code...
+	}
+	 
+	public static function onClose($connection)
+	{
+		
+	}
 
-启动服务
+	static function back($msg='',$code=401,array $data=[]){
+        $res=[
+            'msg'=>$msg,
+            'code'=>$code,
+            'data'=>$data
+        ];
+        return json_encode($res);
+    }
 
-~~~
-cd tp
-php think run
-~~~
+	public function sendMessageByUid($uid,$message)
+	{
+		global $worker;
+		if(isset($worker->uidConnections[$uid]))
+		{
+			$connection = $worker->uidConnections[$uid];
+			$connection->send($message);
+		}
+	}
+	
+	public function broadcast($message)
+	{
+		global $worker;
+		foreach($worker->uidConnections as $connection)
+		{
+				$connection->send($message);
+		}
+	}
+}
+```
 
-然后就可以在浏览器中访问
+<br/>
 
-~~~
-http://localhost:8000
-~~~
+## 自定义开启Channel指令
 
-更新框架
-~~~
-composer update topthink/framework
-~~~
+将会在command模块下新建WorkermanChannel类文件
 
+`php think make:command WorkermanChannel channel`
 
-## 在线手册
+<br/>
 
-+ [完全开发手册](https://www.kancloud.cn/manual/thinkphp5_1/content)
-+ [升级指导](https://www.kancloud.cn/manual/thinkphp5_1/354155) 
+## 修改WorkermanChannel.php
 
+```php
+<?php
 
-## 官方服务
+namespace app\command;
 
-+ [应用服务市场](https://market.topthink.com/)
-+ [ThinkAPI——统一API服务](https://docs.topthink.com/think-api) 
+use think\console\Command;
+use think\console\Input;
+use think\console\Output;
+use think\console\input\Argument;
+use Workerman\Worker;
+use Channel;
 
-## 目录结构
+class WorkermanChannel extends Command
+{
+    protected function configure()
+    {
+        // 指令配置
+        $this->setName('chann')
+            ->addArgument('action', Argument::OPTIONAL, "action  start|stop|restart")
+            ->addArgument('type', Argument::OPTIONAL, "d -d")
+            ->setDescription('workerman chat');
+        // 设置参数
+        
+    }
 
-初始的目录结构如下：
+    protected function execute(Input $input, Output $output)
+    {
+        $this->start();
+    }
 
-~~~
-www  WEB部署目录（或者子目录）
-├─application           应用目录
-│  ├─common             公共模块目录（可以更改）
-│  ├─module_name        模块目录
-│  │  ├─common.php      模块函数文件
-│  │  ├─controller      控制器目录
-│  │  ├─model           模型目录
-│  │  ├─view            视图目录
-│  │  └─ ...            更多类库目录
-│  │
-│  ├─command.php        命令行定义文件
-│  ├─common.php         公共函数文件
-│  └─tags.php           应用行为扩展定义文件
-│
-├─config                应用配置目录
-│  ├─module_name        模块配置目录
-│  │  ├─database.php    数据库配置
-│  │  ├─cache           缓存配置
-│  │  └─ ...            
-│  │
-│  ├─app.php            应用配置
-│  ├─cache.php          缓存配置
-│  ├─cookie.php         Cookie配置
-│  ├─database.php       数据库配置
-│  ├─log.php            日志配置
-│  ├─session.php        Session配置
-│  ├─template.php       模板引擎配置
-│  └─trace.php          Trace配置
-│
-├─route                 路由定义目录
-│  ├─route.php          路由定义
-│  └─...                更多
-│
-├─public                WEB目录（对外访问目录）
-│  ├─index.php          入口文件
-│  ├─router.php         快速测试文件
-│  └─.htaccess          用于apache的重写
-│
-├─thinkphp              框架系统目录
-│  ├─lang               语言文件目录
-│  ├─library            框架类库目录
-│  │  ├─think           Think类库包目录
-│  │  └─traits          系统Trait目录
-│  │
-│  ├─tpl                系统模板目录
-│  ├─base.php           基础定义文件
-│  ├─console.php        控制台入口文件
-│  ├─convention.php     框架惯例配置文件
-│  ├─helper.php         助手函数文件
-│  ├─phpunit.xml        phpunit配置文件
-│  └─start.php          框架入口文件
-│
-├─extend                扩展类库目录
-├─runtime               应用的运行时目录（可写，可定制）
-├─vendor                第三方类库目录（Composer依赖库）
-├─build.php             自动生成定义文件（参考）
-├─composer.json         composer 定义文件
-├─LICENSE.txt           授权说明文件
-├─README.md             README 文件
-├─think                 命令行入口文件
-~~~
+    
+    private function start()
+    {
+        $this->startClienStart();
+    }
 
-> 可以使用php自带webserver快速测试
-> 切换到根目录后，启动命令：php think run
+    private function startClienStart()
+    {
+        $channel_server = new Channel\Server('0.0.0.0','5506');
+        if(!defined('GLOBAL_START'))
+        {
+            Worker::runAll();
+        }
+    }
+}
 
-## 命名规范
+```
 
-`ThinkPHP5`遵循PSR-2命名规范和PSR-4自动加载规范，并且注意如下规范：
+<br/>
 
-### 目录和文件
+## 命令行开启Channel
 
-*   目录不强制规范，驼峰和小写+下划线模式均支持；
-*   类库、函数文件统一以`.php`为后缀；
-*   类的文件名均以命名空间定义，并且命名空间的路径和类库文件所在路径一致；
-*   类名和类文件名保持一致，统一采用驼峰法命名（首字母大写）；
+`php think channel`
 
-### 函数和类、属性命名
+显示一下信息开启成功
 
-*   类的命名采用驼峰法，并且首字母大写，例如 `User`、`UserType`，默认不需要添加后缀，例如`UserController`应该直接命名为`User`；
-*   函数的命名使用小写字母和下划线（小写字母开头）的方式，例如 `get_client_ip`；
-*   方法的命名使用驼峰法，并且首字母小写，例如 `getUserName`；
-*   属性的命名使用驼峰法，并且首字母小写，例如 `tableName`、`instance`；
-*   以双下划线“__”打头的函数或方法作为魔法方法，例如 `__call` 和 `__autoload`；
+```
+----------------------- WORKERMAN -----------------------------
+Workerman version:3.5.31          PHP version:7.2.9
+------------------------ WORKERS -------------------------------
+worker               listen                              processes status
+ChannelServer        frame://0.0.0.0:5506                1         [ok]
+```
 
-### 常量和配置
+## 命令行启动服务端
 
-*   常量以大写字母和下划线命名，例如 `APP_PATH`和 `THINK_PATH`；
-*   配置参数以小写字母和下划线命名，例如 `url_route_on` 和`url_convert`；
-
-### 数据表和字段
-
-*   数据表和字段采用小写加下划线方式命名，并注意字段名不要以下划线开头，例如 `think_user` 表和 `user_name`字段，不建议使用驼峰和中文作为数据表字段命名。
-
-## 参与开发
-
-请参阅 [ThinkPHP5 核心框架包](https://github.com/top-think/framework)。
-
-## 版权信息
-
-ThinkPHP遵循Apache2开源协议发布，并提供免费使用。
-
-本项目包含的第三方源码和二进制文件之版权信息另行标注。
-
-版权所有Copyright © 2006-2018 by ThinkPHP (http://thinkphp.cn)
-
-All rights reserved。
-
-ThinkPHP® 商标和著作权所有者为上海顶想信息科技有限公司。
-
-更多细节参阅 [LICENSE.txt](LICENSE.txt)
+`php think worker:server`
