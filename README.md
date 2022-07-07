@@ -148,43 +148,6 @@ class WorkermanDemo extends Server
 		// {
 		// 	$this->sendMessageByUid($recv_uid, $message);
 		// }
-
-
-
-
-		// $data = json_decode($data,true);
-		// // 要想知道对方是谁，需要客户端发送鉴权数据,在onMessage回调里做鉴权。
-		// if(isset($data['is_first'])){
-		// 	// 是否为改聊天组里的用户
-		// 	$uids = Db::name('group')->where('id',$data['gid'])->value('uids');
-		// 	if(empty($uids)){
-		// 		$connection->send($this->back('err',401));
-		// 		return;
-		// 	}
-		// 	if(!in_array($data['uid'],explode(',',$uids))){
-		// 		$connection->send($this->back('err',401));
-		// 		return;
-		// 	}
-		//  	$statusInfo = Db::name('user_group_status')->where(['uid'=>$data['uid'],'gid'=>$data['gid']])->find();
-		// 	if(empty($statusInfo)){
-		// 		Db::name('user_group_status')->insert(['uid'=>$data['uid'],'gid'=>$data['gid'],'status'=>2,'iden'=>$this->$connection->worker->id . '_' . $connection->id]);
-		// 	}else{
-		// 		Db::name('user_group_status')->where(['uid'=>$data['uid'],'gid'=>$data['gid']])->update(['status'=>2,'iden'=>$connection->worker->id . '_' . $connection->id]);
-		// 	}
-		// 	$connection->send($this->back('已上线',200));
-		// 	return;
-		// }
-		// // 标识列表
-		// // $idenList = Db::name('user_group_status')->where(['gid'=>$data['gid'],'status'=>2])->column('iden');
-		// // foreach($idenList as $v){
-
-		// // }
-		// // dump($connection);
-		// // dump($connection->worker);
-		// foreach($connection->worker->connections as $con)
-		// {
-		// 	$con->send(time());
-		// }
 	}
 	protected function FunctionName()
 	{
